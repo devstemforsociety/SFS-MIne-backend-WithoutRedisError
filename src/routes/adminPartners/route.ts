@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuthToken } from "../../middleware";
 import {
   approvePartner,
+  exportAdminPartners,
   getAdminPartner,
   getAdminPartners,
 } from "./controller";
@@ -23,5 +24,7 @@ adminPartnersRouter.get(
   "/:partnerId/accounts/verify",
   requireAuthToken("ADMIN"),
 );
+
+adminPartnersRouter.get("/export", requireAuthToken("ADMIN"), exportAdminPartners);
 
 export default adminPartnersRouter;

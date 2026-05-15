@@ -6,6 +6,7 @@ import { instructorTable } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { PartnerPayoutEligibilityStatus } from "../../utils/types";
 import { razorpay } from "../../razporpay";
+import ExcelJS from "exceljs";
 
 export const getAdminPartners: RequestHandler = async (
   req: Request,
@@ -219,5 +220,88 @@ export const verifyPartnerAccount: RequestHandler = async (
     res.status(500).json({
       error: "Server error in verifying account details",
     });
+  }
+};
+
+export const exportAdminPartners: RequestHandler = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const adminAuth = req.auth["ADMIN"];
+    if (!adminAuth) {
+      res.status(401).json({ error: INVALID_SESSION_MSG });
+      return;
+    }
+
+    const partners = await db.query.instructorTable.findMany({
+      columns: {
+        hash: false,
+        salt: false,
+      },
+      with: {
+        trainings: { columns: { id: true } },
+      },
+      orderBy(fields, operators) {
+        return operators.desc(fields.createdAt);
+      },
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "SFS Admin";
+    const sheet = workbook.addWorksheet("Partners");
+
+    sheet.columns = [
+      { header: "First Name",      key: "firstName",       width: 18 },
+      { header: "Last Name",       key: "lastName",        width: 18 },
+      { header: "Email",           key: "email",           width: 30 },
+      { header: "Mobile",          key: "mobile",          width: 16 },
+      { header: "Institution",     key: "institutionName", width: 28 },
+      { header: "Approved",        key: "approved",        width: 12 },
+      { header: "Total Trainings", key: "totalTrainings",  width: 16 },
+      { header: "Joined On",       key: "createdAt",       width: 22 },
+    ];
+
+    // Style header row
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A56DB" } };
+    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.height = 20;
+
+    partners.forEach((p) => {
+      sheet.addRow({
+        firstName:       p.firstName ?? "",
+        lastName:        p.lastName ?? "",
+        email:           p.email ?? "",
+        mobile:          p.mobile ?? "",
+        institutionName: p.institutionName ?? "",
+        approved:        p.approvedBy ? "Yes" : "No",
+        totalTrainings:  p.trainings?.length ?? 0,
+        createdAt:       p.createdAt ? new Date(p.createdAt).toLocaleDateString("en-IN") : "",
+      });
+    });
+
+    // Zebra striping
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        row.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: rowNumber % 2 === 0 ? "FFF3F4F6" : "FFFFFFFF" },
+        };
+      }
+      row.border = {
+        bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+      };
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="partners-${Date.now()}.xlsx"`);
+    res.send(buffer);
+  } catch (error) {
+    console.log("🚀 ~ exportAdminPartners ~ error:", error);
+    res.status(500).json({ error: "Server error in exporting partners" });
   }
 };

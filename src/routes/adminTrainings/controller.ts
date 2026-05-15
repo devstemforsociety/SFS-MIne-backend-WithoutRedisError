@@ -7,6 +7,7 @@ import { trainingTable } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { approveTrainingSchema } from "./validation";
 import { sendTrainingCancellationNotice } from "../email/controller";
+import ExcelJS from "exceljs";
 
 export const getTrainings: RequestHandler = async (
   req: Request,
@@ -258,5 +259,100 @@ export const approveTraining: RequestHandler = async (
     res.status(500).json({
       error: "Server error in approving training",
     });
+  }
+};
+
+export const exportAdminTrainings: RequestHandler = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const adminAuth = req.auth["ADMIN"];
+    if (!adminAuth) {
+      res.status(401).json({ error: INVALID_SESSION_MSG });
+      return;
+    }
+
+    const trainings = await db.query.trainingTable.findMany({
+      with: {
+        instructor: {
+          columns: {
+            firstName: true,
+            lastName: true,
+            institutionName: true,
+            email: true,
+            mobile: true,
+          },
+        },
+        enrolments: { columns: { id: true } },
+      },
+      orderBy(fields, operators) {
+        return operators.desc(fields.createdAt);
+      },
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "SFS Admin";
+    const sheet = workbook.addWorksheet("Trainings");
+
+    sheet.columns = [
+      { header: "Title",          key: "title",          width: 32 },
+      { header: "Category",       key: "category",       width: 18 },
+      { header: "Type",           key: "type",           width: 12 },
+      { header: "Partner Name",   key: "partnerName",    width: 24 },
+      { header: "Partner Email",  key: "partnerEmail",   width: 28 },
+      { header: "Start Date",     key: "startDate",      width: 16 },
+      { header: "End Date",       key: "endDate",        width: 16 },
+      { header: "Cost (₹)",       key: "cost",           width: 12 },
+      { header: "Enrolments",     key: "enrolments",     width: 14 },
+      { header: "Approved",       key: "approved",       width: 12 },
+      { header: "Created On",     key: "createdAt",      width: 20 },
+    ];
+
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A56DB" } };
+    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.height = 20;
+
+    trainings.forEach((t) => {
+      const partnerName = [
+        t.instructor?.firstName ?? "",
+        t.instructor?.lastName ?? "",
+      ].join(" ").trim();
+
+      sheet.addRow({
+        title:        t.title ?? "",
+        category:     t.category ?? "",
+        type:         t.type ?? "",
+        partnerName:  partnerName || (t.instructor?.institutionName ?? ""),
+        partnerEmail: t.instructor?.email ?? "",
+        startDate:    t.startDate  ? new Date(t.startDate).toLocaleDateString("en-IN")  : "",
+        endDate:      t.endDate    ? new Date(t.endDate).toLocaleDateString("en-IN")    : "",
+        cost:         t.cost ?? "",
+        enrolments:   t.enrolments?.length ?? 0,
+        approved:     t.approvedBy ? "Yes" : "No",
+        createdAt:    t.createdAt  ? new Date(t.createdAt).toLocaleDateString("en-IN")  : "",
+      });
+    });
+
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        row.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: rowNumber % 2 === 0 ? "FFF3F4F6" : "FFFFFFFF" },
+        };
+      }
+      row.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="trainings-${Date.now()}.xlsx"`);
+    res.send(buffer);
+  } catch (error) {
+    console.log("🚀 ~ exportAdminTrainings ~ error:", error);
+    res.status(500).json({ error: "Server error in exporting trainings" });
   }
 };

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { approveTraining, getTraining, getTrainings } from "./controller";
+import { approveTraining, exportAdminTrainings, getTraining, getTrainings } from "./controller";
 import { requireAuthToken } from "../../middleware";
 
 const adminTrainingRouter = Router();
@@ -11,5 +11,7 @@ adminTrainingRouter.post(
   requireAuthToken("ADMIN"),
   approveTraining,
 );
+
+adminTrainingRouter.get("/export", requireAuthToken("ADMIN"), exportAdminTrainings);
 
 export default adminTrainingRouter;
